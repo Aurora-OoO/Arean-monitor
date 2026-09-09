@@ -2,14 +2,14 @@ name: Monitor Global Call Page
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/3 * * * *'
   workflow_dispatch:
 
 jobs:
   monitor:
     name: Check Global Call Availability
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,10 +20,12 @@ jobs:
         env:
           GLOBALCALL_BASE_URL: ${{ secrets.GLOBALCALL_BASE_URL }}
           GLOBALCALL_ADMIN_KEY: ${{ secrets.GLOBALCALL_ADMIN_KEY }}
+          NODE_NO_WARNINGS: '1'
         run: node scripts/monitor.js
       - name: Send DingTalk alert on failure
         if: failure()
         env:
           DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_SUMMARY: ${{ steps.check.outputs.alert_summary }}
         run: node scripts/notify.js

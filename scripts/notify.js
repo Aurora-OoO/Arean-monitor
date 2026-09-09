@@ -1,56 +1,48 @@
-#!/usr/bin/env node
-/**
- * 发送钉钉报警通知
- *
- * 环境变量：
- * - DINGTALK_WEBHOOK_URL: 钉钉机器人 Webhook
- * - RUN_URL: 本次 GitHub Actions run 链接
- */
+const WEBHOOK_URL = process.env.DINGTALK_WEBHOOK_URL;
+const RUN_URL = process.env.RUN_URL || 'N/A';
+const ALERT_SUMMARY = process.env.ALERT_SUMMARY || '';
 
-const webhookUrl = process.env.DINGTALK_WEBHOOK_URL || '';
-const runUrl = process.env.RUN_URL || '';
-
-if (!webhookUrl) {
-  console.warn('[Notify] DINGTALK_WEBHOOK_URL 未配置，跳过通知');
-  process.exit(0);
-}
-
-async function sendDingtalk() {
-  const title = '❌ Global Call 网关异常';
-  let text = `### ${title}\n\n`;
-  text += 'Global Call 管理后台 API 检查失败，可能不可用。\n\n';
-
-  if (runUrl) {
-    text += `[查看运行日志](${runUrl})\n`;
-  }
-
-  const body = {
-    msgtype: 'markdown',
-    markdown: {
-      title,
-      text,
-    },
-  };
-
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    throw new Error(`钉钉通知发送失败: ${response.status} ${response.statusText}`);
-  }
-
-  const result = await response.json();
-  if (result.errcode !== 0) {
-    throw new Error(`钉钉通知错误: ${result.errmsg}`);
-  }
-
-  console.log('[Notify] 钉钉通知发送成功');
-}
-
-sendDingtalk().catch((err) => {
-  console.error('[Notify] 发送失败:', err);
+if (!WEBHOOK_URL) {
+  console.error('Missing required env: DINGTALK_WEBHOOK_URL');
   process.exit(1);
+}
+
+const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z/, ' UTC');
+
+const detailLine = ALERT_SUMMARY
+  ? `**异常模型：** ${ALERT_SUMMARY}`
+  : '**详情：** 监控脚本执行失败（API 异常或请求超时）';
+
+const payload = {
+  msgtype: 'markdown',
+  markdown: {
+    title: '模型异常告警',
+    text: [
+      '### ⚠️ 模型异常告警',
+      '',
+      `**检测时间：** ${now}`,
+      '',
+      detailLine,
+      '',
+      `[查看运行日志](${RUN_URL})`,
+    ].join('\n'),
+  },
+};
+
+console.log('Sending DingTalk alert ...');
+
+const res = await fetch(WEBHOOK_URL, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(payload),
 });
+
+const body = await res.text();
+console.log(`DingTalk response: ${res.status} ${body}`);
+
+if (!res.ok) {
+  console.error('Failed to send DingTalk alert.');
+  process.exit(1);
+}
+
+console.log('Alert sent successfully.');
