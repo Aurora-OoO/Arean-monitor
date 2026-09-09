@@ -137,7 +137,11 @@ if (downModels.length > 0) {
     const fs = await import('node:fs');
     const summary = downModels
       .map(m => {
-        const errorCode = m.details[0] ?? '未知';
+        // 只取错误码部分，截断过长的描述
+        let errorCode = m.details[0] ?? '未知';
+        const colonIdx = errorCode.indexOf(': ');
+        if (colonIdx > 0) errorCode = errorCode.substring(0, colonIdx);
+        if (errorCode.length > 50) errorCode = errorCode.substring(0, 50) + '...';
         return `${m.name} 调用失败 ${m.errors} 次/总 ${m.total} 次，错误码 ${errorCode}`;
       })
       .join('|');
