@@ -22,8 +22,8 @@ jobs:
           GLOBALCALL_ADMIN_KEY: ${{ secrets.GLOBALCALL_ADMIN_KEY }}
           NODE_NO_WARNINGS: '1'
         run: node scripts/monitor.js
-      - name: Send DingTalk alert (test mode - always send)
-        if: always()
+      - name: Send DingTalk alert on failure
+        if: failure()
         env:
           DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
           GLOBALCALL_BASE_URL: ${{ secrets.GLOBALCALL_BASE_URL }}
