@@ -1,5 +1,5 @@
 const WEBHOOK_URL = process.env.DINGTALK_WEBHOOK_URL;
-const ADMIN_URL = process.env.ADMIN_URL || 'https://your-global-call-url/';
+const ADMIN_URL = process.env.GLOBALCALL_BASE_URL || '';
 const ALERT_SUMMARY = process.env.ALERT_SUMMARY || '';
 
 if (!WEBHOOK_URL) {

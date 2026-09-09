@@ -26,5 +26,6 @@ jobs:
         if: always()
         env:
           DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
+          GLOBALCALL_BASE_URL: ${{ secrets.GLOBALCALL_BASE_URL }}
           ALERT_SUMMARY: ${{ steps.check.outputs.alert_summary }}
         run: node scripts/notify.js
