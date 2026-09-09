@@ -140,7 +140,7 @@ if (downModels.length > 0) {
         const errorCode = m.details[0] ?? '未知';
         return `${m.name} 调用失败，错误码 ${errorCode}`;
       })
-      .join('；');
+      .join('|');
     fs.appendFileSync(
       process.env.GITHUB_OUTPUT,
       `alert_summary=${summary}\n`

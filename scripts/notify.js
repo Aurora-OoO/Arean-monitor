@@ -8,7 +8,7 @@ if (!WEBHOOK_URL) {
 }
 
 const detailLine = ALERT_SUMMARY
-  ? `近三分钟内 ${ALERT_SUMMARY}`
+  ? `近三分钟内\n\n${ALERT_SUMMARY.split('|').map(s => `- ${s}`).join('\n')}`
   : '近三分钟内监控脚本执行失败（API 异常或请求超时）';
 
 const payload = {
