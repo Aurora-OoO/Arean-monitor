@@ -138,7 +138,7 @@ if (downModels.length > 0) {
     const summary = downModels
       .map(m => {
         const errorCode = m.details[0] ?? '未知';
-        return `${m.name} 调用失败，错误码 ${errorCode}`;
+        return `${m.name} 调用失败 ${m.errors} 次/总 ${m.total} 次，错误码 ${errorCode}`;
       })
       .join('|');
     fs.appendFileSync(
