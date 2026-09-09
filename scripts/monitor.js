@@ -83,7 +83,7 @@ for (const log of records) {
   const isFailed = log.status !== 'SUCCESS' || log.rejected === true;
 
   if (!modelStats[model]) {
-    modelStats[model] = { total: 0, errors: 0, errorDetails: [], traceIds: [], upstreamRequestIds: [] };
+    modelStats[model] = { total: 0, errors: 0, errorDetails: [], tracePairs: [] };
   }
 
   modelStats[model].total++;
@@ -96,13 +96,13 @@ for (const log of records) {
 
     modelStats[model].errors++;
 
-    // 收集 traceId 和上游 request_id，方便排查（最多各保留 5 个）
-    if (log.traceId && modelStats[model].traceIds.length < 5) {
-      modelStats[model].traceIds.push(log.traceId);
-    }
+    // 按失败记录收集 traceId 和上游 request_id（同一行展示，最多保留 5 条）
     const upstreamRequestId = extractUpstreamRequestId(log.errorMessage);
-    if (upstreamRequestId && modelStats[model].upstreamRequestIds.length < 5) {
-      modelStats[model].upstreamRequestIds.push(upstreamRequestId);
+    if ((log.traceId || upstreamRequestId) && modelStats[model].tracePairs.length < 5) {
+      modelStats[model].tracePairs.push({
+        traceId: log.traceId || null,
+        requestId: upstreamRequestId || null,
+      });
     }
 
     if (modelStats[model].errorDetails.length < 3) {
@@ -120,17 +120,20 @@ function extractUpstreamRequestId(errorMessage) {
   return match ? match[1] : null;
 }
 
-// 拼接排查 ID：每个 ID 单独一行，超过 5 个则提示信息过长
+// 拼接排查 ID：同一失败记录的 request_id 和 traceId 在同一行，超过 5 行则提示信息过长
 function formatTraceInfo(m) {
-  const ids = [
-    ...m.upstreamRequestIds.map(id => `request_id: ${id}`),
-    ...m.traceIds.map(id => `traceId: ${id}`),
-  ];
-  if (ids.length === 0) return '';
+  const pairs = m.tracePairs;
+  if (pairs.length === 0) return '';
 
-  let lines = ids;
-  if (ids.length > 5) {
-    lines = [...ids.slice(0, 5), '信息过长'];
+  let lines = pairs.map(pair => {
+    const parts = [];
+    if (pair.requestId) parts.push(`request_id: ${pair.requestId}`);
+    if (pair.traceId) parts.push(`traceId: ${pair.traceId}`);
+    return parts.join(', ');
+  });
+
+  if (lines.length > 5) {
+    lines = [...lines.slice(0, 5), '信息过长'];
   }
   return '\n' + lines.map(line => `  - ${line}`).join('\n');
 }
@@ -155,8 +158,7 @@ for (const [model, stats] of Object.entries(modelStats)) {
       total: stats.total,
       successRate,
       details: stats.errorDetails,
-      traceIds: stats.traceIds,
-      upstreamRequestIds: stats.upstreamRequestIds,
+      tracePairs: stats.tracePairs,
     });
   }
 }
