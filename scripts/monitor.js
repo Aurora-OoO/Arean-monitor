@@ -136,11 +136,14 @@ if (downModels.length > 0) {
   if (process.env.GITHUB_OUTPUT) {
     const fs = await import('node:fs');
     const summary = downModels
-      .map(m => `${m.name} (${m.errors}/${m.total} 失败${m.details[0] ? ', ' + m.details[0] : ''})`)
-      .join('; ');
+      .map(m => {
+        const errorCode = m.details[0] ?? '未知';
+        return `${m.name} 调用失败，错误码 ${errorCode}`;
+      })
+      .join('；');
     fs.appendFileSync(
       process.env.GITHUB_OUTPUT,
-      `alert_summary=${downModels.length} 个模型异常: ${summary}\n`
+      `alert_summary=${summary}\n`
     );
   }
 

@@ -7,11 +7,9 @@ if (!WEBHOOK_URL) {
   process.exit(1);
 }
 
-const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z/, ' UTC');
-
 const detailLine = ALERT_SUMMARY
-  ? `**异常模型：** ${ALERT_SUMMARY}`
-  : '**详情：** 监控脚本执行失败（API 异常或请求超时）';
+  ? `近三分钟内 ${ALERT_SUMMARY}`
+  : '近三分钟内监控脚本执行失败（API 异常或请求超时）';
 
 const payload = {
   msgtype: 'markdown',
@@ -19,8 +17,6 @@ const payload = {
     title: '模型异常告警',
     text: [
       '### ⚠️ 模型异常告警',
-      '',
-      `**检测时间：** ${now}`,
       '',
       detailLine,
       '',
