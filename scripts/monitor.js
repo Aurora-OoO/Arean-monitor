@@ -9,7 +9,7 @@ if (!BASE_URL || !ADMIN_KEY) {
 const ROOT = BASE_URL.replace(/\/+$/, '');
 
 // ─── 配置 ───────────────────────────────────────────
-const LOOKBACK_MINUTES = 2;    // 回看最近 2 分钟的日志
+const LOOKBACK_MINUTES = 3;    // 回看最近 3 分钟的日志
 const PAGE_SIZE = 200;         // 单次最多拉取条数
 const REQUEST_TIMEOUT_MS = 15_000;
 
