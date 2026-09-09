@@ -83,7 +83,7 @@ for (const log of records) {
   const isFailed = log.status !== 'SUCCESS' || log.rejected === true;
 
   if (!modelStats[model]) {
-    modelStats[model] = { total: 0, errors: 0, errorDetails: [] };
+    modelStats[model] = { total: 0, errors: 0, errorDetails: [], traceIds: [], upstreamRequestIds: [] };
   }
 
   modelStats[model].total++;
@@ -95,12 +95,29 @@ for (const log of records) {
     if (isClientError) continue;
 
     modelStats[model].errors++;
+
+    // 收集 traceId 和上游 request_id，方便排查
+    if (log.traceId && modelStats[model].traceIds.length < 3) {
+      modelStats[model].traceIds.push(log.traceId);
+    }
+    const upstreamRequestId = extractUpstreamRequestId(log.errorMessage);
+    if (upstreamRequestId && modelStats[model].upstreamRequestIds.length < 3) {
+      modelStats[model].upstreamRequestIds.push(upstreamRequestId);
+    }
+
     if (modelStats[model].errorDetails.length < 3) {
       const code = log.errorCode ?? log.errorCategory ?? 'UNKNOWN';
       const msg = log.errorMessage ?? '';
       modelStats[model].errorDetails.push(`${code}${msg ? ': ' + msg : ''}`);
     }
   }
+}
+
+// 从错误信息中提取上游 new api request_id
+function extractUpstreamRequestId(errorMessage) {
+  if (!errorMessage) return null;
+  const match = String(errorMessage).match(/request id[:\s]+([a-zA-Z0-9_-]+)/i);
+  return match ? match[1] : null;
 }
 
 // ─── 逐模型判定 ─────────────────────────────────────
@@ -123,6 +140,8 @@ for (const [model, stats] of Object.entries(modelStats)) {
       total: stats.total,
       successRate,
       details: stats.errorDetails,
+      traceIds: stats.traceIds,
+      upstreamRequestIds: stats.upstreamRequestIds,
     });
   }
 }
@@ -131,7 +150,10 @@ for (const [model, stats] of Object.entries(modelStats)) {
 if (downModels.length > 0) {
   console.error(`\n[ALERT] ${downModels.length} 个模型异常：`);
   for (const m of downModels) {
-    console.error(`  - ${m.name}: ${m.errors}/${m.total} 失败, 成功率 ${(m.successRate * 100).toFixed(1)}%`);
+    const traceInfo = m.upstreamRequestIds.length > 0
+      ? `request_id: ${m.upstreamRequestIds[0]}`
+      : (m.traceIds.length > 0 ? `traceId: ${m.traceIds[0]}` : '');
+    console.error(`  - ${m.name}: ${m.errors}/${m.total} 失败, 成功率 ${(m.successRate * 100).toFixed(1)}%${traceInfo ? ', ' + traceInfo : ''}`);
   }
 
   // 将失败摘要写入 GitHub Actions output 供 notify.js 使用
@@ -144,7 +166,13 @@ if (downModels.length > 0) {
         const colonIdx = errorCode.indexOf(': ');
         if (colonIdx > 0) errorCode = errorCode.substring(0, colonIdx);
         if (errorCode.length > 50) errorCode = errorCode.substring(0, 50) + '...';
-        return `${m.name} 调用失败 ${m.errors} 次/总 ${m.total} 次，成功率 ${(m.successRate * 100).toFixed(1)}%，错误码 ${errorCode}`;
+
+        // 附带一个排查 ID：优先用上游 request_id，否则用 traceId
+        const traceInfo = m.upstreamRequestIds.length > 0
+          ? `request_id: ${m.upstreamRequestIds[0]}`
+          : (m.traceIds.length > 0 ? `traceId: ${m.traceIds[0]}` : '');
+
+        return `${m.name} 调用失败 ${m.errors} 次/总 ${m.total} 次，成功率 ${(m.successRate * 100).toFixed(1)}%，错误码 ${errorCode}${traceInfo ? '，' + traceInfo : ''}`;
       })
       .join('|');
     fs.appendFileSync(
