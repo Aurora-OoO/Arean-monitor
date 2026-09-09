@@ -120,17 +120,19 @@ function extractUpstreamRequestId(errorMessage) {
   return match ? match[1] : null;
 }
 
-// 拼接排查 ID：全部展示，超过 5 个则提示信息过长
-function formatTraceInfo(m, separator = '，') {
+// 拼接排查 ID：每个 ID 单独一行，超过 5 个则提示信息过长
+function formatTraceInfo(m) {
   const ids = [
     ...m.upstreamRequestIds.map(id => `request_id: ${id}`),
     ...m.traceIds.map(id => `traceId: ${id}`),
   ];
   if (ids.length === 0) return '';
+
+  let lines = ids;
   if (ids.length > 5) {
-    return `${separator}${ids.slice(0, 5).join(' / ')}，信息过长`;
+    lines = [...ids.slice(0, 5), '信息过长'];
   }
-  return `${separator}${ids.join(' / ')}`;
+  return '\n' + lines.map(line => `  - ${line}`).join('\n');
 }
 
 // ─── 逐模型判定 ─────────────────────────────────────
@@ -163,7 +165,7 @@ for (const [model, stats] of Object.entries(modelStats)) {
 if (downModels.length > 0) {
   console.error(`\n[ALERT] ${downModels.length} 个模型异常：`);
   for (const m of downModels) {
-    console.error(`  - ${m.name}: ${m.errors}/${m.total} 失败, 成功率 ${(m.successRate * 100).toFixed(1)}%${formatTraceInfo(m, ', ')}`);
+    console.error(`  - ${m.name}: ${m.errors}/${m.total} 失败, 成功率 ${(m.successRate * 100).toFixed(1)}%${formatTraceInfo(m)}`);
   }
 
   // 将失败摘要写入 GitHub Actions output 供 notify.js 使用
