@@ -26,6 +26,5 @@ jobs:
         if: always()
         env:
           DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SUMMARY: ${{ steps.check.outputs.alert_summary }}
         run: node scripts/notify.js

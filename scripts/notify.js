@@ -1,5 +1,5 @@
 const WEBHOOK_URL = process.env.DINGTALK_WEBHOOK_URL;
-const RUN_URL = process.env.RUN_URL || 'N/A';
+const ADMIN_URL = process.env.ADMIN_URL || 'https://your-global-call-url/';
 const ALERT_SUMMARY = process.env.ALERT_SUMMARY || '';
 
 if (!WEBHOOK_URL) {
@@ -24,7 +24,7 @@ const payload = {
       '',
       detailLine,
       '',
-      `[查看运行日志](${RUN_URL})`,
+      `[查看日志](${ADMIN_URL})`,
     ].join('\n'),
   },
 };
