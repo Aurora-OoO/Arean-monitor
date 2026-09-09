@@ -11,7 +11,7 @@ const ROOT = BASE_URL.replace(/\/+$/, '');
 // ─── 配置 ───────────────────────────────────────────
 const LOOKBACK_MINUTES = 3;             // 回看最近 3 分钟的日志
 const PAGE_SIZE = 200;                  // 单次最多拉取条数
-const SUCCESS_RATE_THRESHOLD = 0.8;     // 成功率低于 80% 即报警
+const SUCCESS_RATE_THRESHOLD = 0.85;    // 成功率低于 85% 即报警
 const REQUEST_TIMEOUT_MS = 15_000;
 
 // ─── 构造查询时间范围 ───────────────────────────────
