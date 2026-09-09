@@ -9,8 +9,9 @@ if (!BASE_URL || !ADMIN_KEY) {
 const ROOT = BASE_URL.replace(/\/+$/, '');
 
 // ─── 配置 ───────────────────────────────────────────
-const LOOKBACK_MINUTES = 3;    // 回看最近 3 分钟的日志
-const PAGE_SIZE = 200;         // 单次最多拉取条数
+const LOOKBACK_MINUTES = 3;             // 回看最近 3 分钟的日志
+const PAGE_SIZE = 200;                  // 单次最多拉取条数
+const SUCCESS_RATE_THRESHOLD = 0.8;     // 成功率低于 80% 即报警
 const REQUEST_TIMEOUT_MS = 15_000;
 
 // ─── 构造查询时间范围 ───────────────────────────────
@@ -106,20 +107,21 @@ for (const log of records) {
 const downModels = [];
 
 for (const [model, stats] of Object.entries(modelStats)) {
-  const rate = stats.errors / stats.total;
-  const icon = stats.errors > 0 ? '✗' : '✓';
-  console.log(`${icon} ${model}: ${stats.total} 次调用, ${stats.errors} 次失败 (${(rate * 100).toFixed(1)}%)`);
+  const errorRate = stats.errors / stats.total;
+  const successRate = 1 - errorRate;
+  const icon = successRate < SUCCESS_RATE_THRESHOLD ? '✗' : '✓';
+  console.log(`${icon} ${model}: ${stats.total} 次调用, ${stats.errors} 次失败, 成功率 ${(successRate * 100).toFixed(1)}%`);
   for (const detail of stats.errorDetails) {
     console.log(`    → ${detail}`);
   }
 
-  // 有任何失败即判定为该模型挂了
-  if (stats.errors > 0) {
+  // 成功率低于阈值才判定为异常
+  if (successRate < SUCCESS_RATE_THRESHOLD) {
     downModels.push({
       name: model,
       errors: stats.errors,
       total: stats.total,
-      rate,
+      successRate,
       details: stats.errorDetails,
     });
   }
@@ -129,7 +131,7 @@ for (const [model, stats] of Object.entries(modelStats)) {
 if (downModels.length > 0) {
   console.error(`\n[ALERT] ${downModels.length} 个模型异常：`);
   for (const m of downModels) {
-    console.error(`  - ${m.name}: ${m.errors}/${m.total} 失败 (${(m.rate * 100).toFixed(1)}%)`);
+    console.error(`  - ${m.name}: ${m.errors}/${m.total} 失败, 成功率 ${(m.successRate * 100).toFixed(1)}%`);
   }
 
   // 将失败摘要写入 GitHub Actions output 供 notify.js 使用
@@ -142,7 +144,7 @@ if (downModels.length > 0) {
         const colonIdx = errorCode.indexOf(': ');
         if (colonIdx > 0) errorCode = errorCode.substring(0, colonIdx);
         if (errorCode.length > 50) errorCode = errorCode.substring(0, 50) + '...';
-        return `${m.name} 调用失败 ${m.errors} 次/总 ${m.total} 次，错误码 ${errorCode}`;
+        return `${m.name} 调用失败 ${m.errors} 次/总 ${m.total} 次，成功率 ${(m.successRate * 100).toFixed(1)}%，错误码 ${errorCode}`;
       })
       .join('|');
     fs.appendFileSync(
