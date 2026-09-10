@@ -9,9 +9,10 @@ if (!BASE_URL || !ADMIN_KEY) {
 const ROOT = BASE_URL.replace(/\/+$/, '');
 
 // ─── 配置 ───────────────────────────────────────────
-const LOOKBACK_MINUTES = 3;             // 回看最近 3 分钟的日志
-const PAGE_SIZE = 200;                  // 单次最多拉取条数
+const LOOKBACK_MINUTES = 5;             // 回看最近 5 分钟的日志
+const PAGE_SIZE = 500;                  // 单次最多拉取条数
 const SUCCESS_RATE_THRESHOLD = 0.85;    // 成功率低于 85% 即报警
+const MIN_CALLS_FOR_ALERT = 15;         // 总调用次数低于该值时不报警（避免低流量误报）
 const REQUEST_TIMEOUT_MS = 15_000;
 
 // ─── 构造查询时间范围 ───────────────────────────────
@@ -189,8 +190,8 @@ for (const [model, stats] of Object.entries(modelStats)) {
     console.log(`    → ${detail}`);
   }
 
-  // 成功率低于阈值才判定为异常
-  if (successRate < SUCCESS_RATE_THRESHOLD) {
+  // 成功率低于阈值且样本数足够才判定为异常
+  if (stats.total >= MIN_CALLS_FOR_ALERT && successRate < SUCCESS_RATE_THRESHOLD) {
     downModels.push({
       name: model,
       errors: stats.errors,
