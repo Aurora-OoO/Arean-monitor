@@ -77,6 +77,7 @@ console.log(`获取 ${records.length}/${total} 条调用记录\n`);
 
 // ─── 按模型统计 ─────────────────────────────────────
 const modelStats = {};
+let sampleFailedLog = null;
 
 for (const log of records) {
   const model = log.modelName || 'unknown';
@@ -95,12 +96,14 @@ for (const log of records) {
     if (isClientError) continue;
 
     modelStats[model].errors++;
+    if (!sampleFailedLog) sampleFailedLog = log;
 
     // 按失败记录收集 traceId 和上游 request_id（同一行展示，最多保留 5 条）
-    const upstreamRequestId = extractUpstreamRequestId(log.errorMessage);
-    if ((log.traceId || upstreamRequestId) && modelStats[model].tracePairs.length < 5) {
+    const traceId = findTraceId(log);
+    const upstreamRequestId = findUpstreamRequestId(log);
+    if ((traceId || upstreamRequestId) && modelStats[model].tracePairs.length < 5) {
       modelStats[model].tracePairs.push({
-        traceId: log.traceId || null,
+        traceId: traceId || null,
         requestId: upstreamRequestId || null,
       });
     }
@@ -113,11 +116,47 @@ for (const log of records) {
   }
 }
 
-// 从错误信息中提取上游 new api request_id
-function extractUpstreamRequestId(errorMessage) {
+// 调试：如果存在失败记录却一条排查 ID 都没收集到，打印一次原始字段名和候选值
+if (sampleFailedLog) {
+  const anyTracePairs = Object.values(modelStats).some(s => s.tracePairs.length > 0);
+  if (!anyTracePairs) {
+    console.log('⚠ 失败日志中未找到 traceId / request_id，原始字段名：');
+    console.log(Object.keys(sampleFailedLog).sort().join(', '));
+    const idFields = ['traceId', 'trace_id', 'callId', 'call_id', 'requestId', 'request_id', 'upstreamRequestId'];
+    for (const key of idFields) {
+      if (sampleFailedLog[key]) console.log(`  ${key}: ${sampleFailedLog[key]}`);
+    }
+  }
+}
+
+// 从日志记录中查找 traceId（兼容多种字段命名）
+function findTraceId(log) {
+  const candidates = ['traceId', 'trace_id', 'traceID', 'callId', 'call_id', 'callID'];
+  for (const key of candidates) {
+    if (log[key]) return String(log[key]);
+  }
+  return null;
+}
+
+// 查找上游 request_id：优先取日志字段，其次从 errorMessage 中解析
+function findUpstreamRequestId(log) {
+  const fieldCandidates = ['upstreamRequestId', 'requestId', 'request_id', 'upstreamRequestID'];
+  for (const key of fieldCandidates) {
+    if (log[key]) return String(log[key]);
+  }
+
+  const errorMessage = log.errorMessage;
   if (!errorMessage) return null;
-  const match = String(errorMessage).match(/request id[:\s]+([a-zA-Z0-9_-]+)/i);
-  return match ? match[1] : null;
+  const patterns = [
+    /request\s*id[:\s]+([a-zA-Z0-9_-]+)/i,
+    /request-id[:\s]+([a-zA-Z0-9_-]+)/i,
+    /requestId[:\s]+([a-zA-Z0-9_-]+)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = String(errorMessage).match(pattern);
+    if (match) return match[1];
+  }
+  return null;
 }
 
 // 拼接排查 ID：同一失败记录的 request_id 和 traceId 在同一行，超过 5 行则提示信息过长
