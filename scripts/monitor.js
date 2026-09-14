@@ -10,7 +10,8 @@ const ROOT = BASE_URL.replace(/\/+$/, '');
 
 // ─── 配置 ───────────────────────────────────────────
 const LOOKBACK_MINUTES = 5;             // 回看最近 5 分钟的日志
-const PAGE_SIZE = 500;                  // 单次最多拉取条数
+const PAGE_SIZE = 100;                  // API 最大支持 100 条/页
+const MAX_PAGES = 10;                   // 最多翻 10 页，防止异常时无限请求
 const SUCCESS_RATE_THRESHOLD = 0.8;     // 成功率低于等于 80% 即报警
 const MIN_CALLS_FOR_ALERT = 8;          // 单个模型 5 分钟内调用次数低于 8 次不报警
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -19,62 +20,74 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const endTime = new Date();
 const startTime = new Date(endTime.getTime() - LOOKBACK_MINUTES * 60 * 1000);
 
-const params = new URLSearchParams({
-  startTime: startTime.toISOString(),
-  endTime: endTime.toISOString(),
-  logType: 'MODEL_CALL',
-  pageNo: '1',
-  pageSize: String(PAGE_SIZE),
-});
-
-const url = `${ROOT}/api/v1/aignite/usage-logs/query?${params}`;
 console.log(`Querying usage logs: ${startTime.toISOString()} ~ ${endTime.toISOString()}`);
 
 // ─── 请求 ───────────────────────────────────────────
 // ELB 证书域名与地址不匹配，需要跳过 TLS 校验
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
-const controller = new AbortController();
-const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-let data;
-try {
-  const res = await fetch(url, {
-    headers: {
-      'X-Global-Call-Admin-Key': ADMIN_KEY,
-      'Content-Type': 'application/json',
-    },
-    signal: controller.signal,
+async function fetchPage(pageNo) {
+  const params = new URLSearchParams({
+    startTime: startTime.toISOString(),
+    endTime: endTime.toISOString(),
+    logType: 'MODEL_CALL',
+    pageNo: String(pageNo),
+    pageSize: String(PAGE_SIZE),
   });
+  const url = `${ROOT}/api/v1/aignite/usage-logs/query?${params}`;
 
-  clearTimeout(timeout);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  if (!res.ok) {
-    console.error(`API returned ${res.status} ${res.statusText}`);
-    process.exit(1);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'X-Global-Call-Admin-Key': ADMIN_KEY,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      throw new Error(`API returned ${res.status} ${res.statusText}`);
+    }
+
+    const data = await res.json();
+    if (data.code !== 0 || data.success !== true) {
+      throw new Error(`API 业务异常: code=${data.code}, message=${data.message}`);
+    }
+    return data.data;
+  } catch (err) {
+    clearTimeout(timeout);
+    throw err;
   }
-
-  data = await res.json();
-} catch (err) {
-  clearTimeout(timeout);
-  console.error(`Request failed: ${err.message}`);
-  process.exit(1);
 }
 
-// ─── 校验响应 ───────────────────────────────────────
-if (data.code !== 0 || data.success !== true) {
-  console.error(`API 业务异常: code=${data.code}, message=${data.message}`);
-  process.exit(1);
+let allRecords = [];
+let total = 0;
+let pageNo = 1;
+
+while (pageNo <= MAX_PAGES) {
+  const data = await fetchPage(pageNo);
+  total = data.total ?? 0;
+  const records = data.records ?? [];
+  allRecords = allRecords.concat(records);
+
+  if (records.length < PAGE_SIZE || allRecords.length >= total) {
+    break;
+  }
+  pageNo++;
 }
 
-const { records, total } = data.data;
-
-if (!Array.isArray(records) || records.length === 0) {
+if (allRecords.length === 0) {
   console.log(`最近 ${LOOKBACK_MINUTES} 分钟内无调用记录（total=${total}），视为正常。`);
   process.exit(0);
 }
 
-console.log(`获取 ${records.length}/${total} 条调用记录\n`);
+console.log(`获取 ${allRecords.length}/${total} 条调用记录（共 ${pageNo} 页）\n`);
+const records = allRecords;
 
 // ─── 按模型统计 ─────────────────────────────────────
 const modelStats = {};
