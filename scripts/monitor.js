@@ -12,9 +12,16 @@ const ROOT = BASE_URL.replace(/\/+$/, '');
 const LOOKBACK_MINUTES = 5;             // 回看最近 5 分钟的日志
 const PAGE_SIZE = 100;                  // API 最大支持 100 条/页
 const MAX_PAGES = 10;                   // 最多翻 10 页，防止异常时无限请求
-const SUCCESS_RATE_THRESHOLD = 0.8;     // 成功率低于等于 80% 即报警
-const MIN_CALLS_FOR_ALERT = 8;          // 单个模型 5 分钟内调用次数低于 8 次不报警
+const MIN_CALLS_FOR_ALERT = 3;          // 单个模型 5 分钟内调用次数低于 3 次不报警
 const REQUEST_TIMEOUT_MS = 15_000;
+
+// 按调用量分档判定是否异常
+function getAlertThreshold(total) {
+  if (total >= 3 && total <= 5) return 0.4;   // 3-5 次：成功率低于 40% 报警
+  if (total >= 6 && total <= 8) return 0.6;   // 6-8 次：成功率低于 60% 报警
+  if (total >= 9) return 0.8;                 // 9 次及以上：成功率低于 80% 报警
+  return null;                                // 样本不足，不报警
+}
 
 // ─── 构造查询时间范围 ───────────────────────────────
 const endTime = new Date();
@@ -197,19 +204,23 @@ const downModels = [];
 for (const [model, stats] of Object.entries(modelStats)) {
   const errorRate = stats.errors / stats.total;
   const successRate = 1 - errorRate;
-  const icon = successRate < SUCCESS_RATE_THRESHOLD ? '✗' : '✓';
-  console.log(`${icon} ${model}: ${stats.total} 次调用, ${stats.errors} 次失败, 成功率 ${(successRate * 100).toFixed(1)}%`);
+  const threshold = getAlertThreshold(stats.total);
+  const isAbnormal = threshold !== null && successRate < threshold;
+  const icon = isAbnormal ? '✗' : '✓';
+  const thresholdText = threshold !== null ? `阈值 ${(threshold * 100).toFixed(0)}%` : '样本不足';
+  console.log(`${icon} ${model}: ${stats.total} 次调用, ${stats.errors} 次失败, 成功率 ${(successRate * 100).toFixed(1)}% (${thresholdText})`);
   for (const detail of stats.errorDetails) {
     console.log(`    → ${detail}`);
   }
 
-  // 成功率低于等于阈值且样本数足够才判定为异常
-  if (stats.total >= MIN_CALLS_FOR_ALERT && successRate <= SUCCESS_RATE_THRESHOLD) {
+  // 样本数足够且成功率低于对应档位阈值才判定为异常
+  if (isAbnormal) {
     downModels.push({
       name: model,
       errors: stats.errors,
       total: stats.total,
       successRate,
+      threshold,
       details: stats.errorDetails,
       tracePairs: stats.tracePairs,
     });
@@ -220,7 +231,7 @@ for (const [model, stats] of Object.entries(modelStats)) {
 if (downModels.length > 0) {
   console.error(`\n[ALERT] ${downModels.length} 个模型异常：`);
   for (const m of downModels) {
-    console.error(`  - ${m.name}: ${m.errors}/${m.total} 失败, 成功率 ${(m.successRate * 100).toFixed(1)}%${formatTraceInfo(m)}`);
+    console.error(`  - ${m.name}: ${m.errors}/${m.total} 失败, 成功率 ${(m.successRate * 100).toFixed(1)}% (阈值 ${(m.threshold * 100).toFixed(0)}%)${formatTraceInfo(m)}`);
   }
 
   // 将失败摘要写入 GitHub Actions output 供 notify.js 使用
@@ -234,7 +245,7 @@ if (downModels.length > 0) {
         if (colonIdx > 0) errorCode = errorCode.substring(0, colonIdx);
         if (errorCode.length > 50) errorCode = errorCode.substring(0, 50) + '...';
 
-        return `${m.name} 调用失败 ${m.errors} 次/总 ${m.total} 次，成功率 ${(m.successRate * 100).toFixed(1)}%，错误码 ${errorCode}${formatTraceInfo(m)}`;
+        return `${m.name} 调用失败 ${m.errors} 次/总 ${m.total} 次，成功率 ${(m.successRate * 100).toFixed(1)}% (阈值 ${(m.threshold * 100).toFixed(0)}%)，错误码 ${errorCode}${formatTraceInfo(m)}`;
       })
       .join('|');
     fs.appendFileSync(
