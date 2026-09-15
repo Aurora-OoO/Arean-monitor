@@ -248,9 +248,10 @@ if (downModels.length > 0) {
         return `${m.name} 调用失败 ${m.errors} 次/总 ${m.total} 次，成功率 ${(m.successRate * 100).toFixed(1)}% (阈值 ${(m.threshold * 100).toFixed(0)}%)，错误码 ${errorCode}${formatTraceInfo(m)}`;
       })
       .join('|');
+    // 使用 heredoc 语法写入多行 output，避免 traceId 换行导致 GitHub Actions 解析失败
     fs.appendFileSync(
       process.env.GITHUB_OUTPUT,
-      `alert_summary=${summary}\n`
+      `alert_summary<<__ALERT_SUMMARY_EOF__\n${summary}\n__ALERT_SUMMARY_EOF__\n`
     );
   }
 
