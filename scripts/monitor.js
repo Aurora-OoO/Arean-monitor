@@ -205,7 +205,7 @@ for (const [model, stats] of Object.entries(modelStats)) {
   const errorRate = stats.errors / stats.total;
   const successRate = 1 - errorRate;
   const threshold = getAlertThreshold(stats.total);
-  const isAbnormal = threshold !== null && successRate < threshold;
+  const isAbnormal = threshold !== null && successRate <= threshold;
   const icon = isAbnormal ? '✗' : '✓';
   const thresholdText = threshold !== null ? `阈值 ${(threshold * 100).toFixed(0)}%` : '样本不足';
   console.log(`${icon} ${model}: ${stats.total} 次调用, ${stats.errors} 次失败, 成功率 ${(successRate * 100).toFixed(1)}% (${thresholdText})`);
