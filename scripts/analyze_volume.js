@@ -10,21 +10,16 @@ const ROOT = BASE_URL.replace(/\/+$/, '');
 
 // ─── 配置 ───────────────────────────────────────────
 const LOOKBACK_HOURS = 24;      // 回看最近 24 小时
+const CHUNK_HOURS = 2;          // 每次查询 2 小时，避免超过 API 10k 翻页限制
 const PAGE_SIZE = 100;          // API 最大支持 100 条/页
-const MAX_PAGES = 200;          // 最多翻 200 页（20,000 条）
+const MAX_PAGES = 100;          // 每段最多翻 100 页（10,000 条）
 const REQUEST_TIMEOUT_MS = 15_000;
 const BUCKET_MINUTES = 5;       // 按 5 分钟聚合
-
-// ─── 构造查询时间范围 ───────────────────────────────
-const endTime = new Date();
-const startTime = new Date(endTime.getTime() - LOOKBACK_HOURS * 60 * 60 * 1000);
-
-console.log(`Querying usage logs: ${startTime.toISOString()} ~ ${endTime.toISOString()}`);
 
 // ─── 请求 ───────────────────────────────────────────
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
-async function fetchPage(pageNo) {
+async function fetchPage(startTime, endTime, pageNo) {
   const params = new URLSearchParams({
     startTime: startTime.toISOString(),
     endTime: endTime.toISOString(),
@@ -63,35 +58,101 @@ async function fetchPage(pageNo) {
   }
 }
 
-let allRecords = [];
-let total = 0;
-let pageNo = 1;
+async function fetchRange(startTime, endTime) {
+  let records = [];
+  let total = 0;
+  let pageNo = 1;
 
-while (pageNo <= MAX_PAGES) {
-  const data = await fetchPage(pageNo);
-  total = data.total ?? 0;
-  const records = data.records ?? [];
-  allRecords = allRecords.concat(records);
+  while (pageNo <= MAX_PAGES) {
+    const data = await fetchPage(startTime, endTime, pageNo);
+    total = data.total ?? 0;
+    const pageRecords = data.records ?? [];
+    records = records.concat(pageRecords);
 
-  if (records.length < PAGE_SIZE || allRecords.length >= total) {
-    break;
+    if (pageRecords.length < PAGE_SIZE || records.length >= total) {
+      break;
+    }
+    pageNo++;
   }
-  pageNo++;
+
+  return { records, total, pages: pageNo };
 }
 
-console.log(`获取 ${allRecords.length}/${total} 条调用记录（共 ${pageNo} 页）\n`);
+// ─── 构造查询时间范围 ───────────────────────────────
+const endTime = new Date();
+const startTime = new Date(endTime.getTime() - LOOKBACK_HOURS * 60 * 60 * 1000);
+
+console.log(`Querying usage logs: ${startTime.toISOString()} ~ ${endTime.toISOString()}`);
+console.log(`Split into ${CHUNK_HOURS}-hour chunks to avoid API pagination limit\n`);
+
+// ─── 按时间段分段查询 ───────────────────────────────
+const allRecords = [];
+let totalFetched = 0;
+let totalExpected = 0;
+let chunkCount = 0;
+
+let chunkStart = new Date(startTime);
+while (chunkStart < endTime) {
+  const chunkEnd = new Date(Math.min(chunkStart.getTime() + CHUNK_HOURS * 60 * 60 * 1000, endTime.getTime()));
+  chunkCount++;
+
+  try {
+    const { records, total, pages } = await fetchRange(chunkStart, chunkEnd);
+    allRecords.push(...records);
+    totalFetched += records.length;
+    totalExpected += total;
+    console.log(`[${chunkCount}] ${chunkStart.toISOString()} ~ ${chunkEnd.toISOString()}: ${records.length}/${total} 条 (${pages} 页)`);
+  } catch (err) {
+    console.error(`[${chunkCount}] 查询失败: ${err.message}`);
+  }
+
+  chunkStart = chunkEnd;
+}
+
+console.log(`\n获取 ${allRecords.length}/${totalExpected} 条调用记录（共 ${chunkCount} 段）\n`);
 
 if (allRecords.length === 0) {
   console.log('无调用记录');
   process.exit(0);
 }
 
+// ─── 调试：看看时间字段叫什么 ───────────────────────
+if (allRecords.length > 0) {
+  const sample = allRecords[0];
+  console.log('第一条日志字段名：');
+  console.log(Object.keys(sample).sort().join(', '));
+
+  const timeFields = ['startTime', 'endTime', 'timestamp', 'createdAt', 'callTime', 'requestTime', 'logTime', 'time'];
+  console.log('时间相关字段值：');
+  for (const key of timeFields) {
+    if (sample[key] !== undefined) {
+      console.log(`  ${key}: ${sample[key]} (${new Date(sample[key]).toISOString()})`);
+    }
+  }
+  console.log('');
+}
+
+// 自动找到可用的时间字段
+function getLogTime(log) {
+  const timeFields = ['startTime', 'endTime', 'timestamp', 'createdAt', 'callTime', 'requestTime', 'logTime', 'time'];
+  for (const key of timeFields) {
+    if (log[key]) {
+      const d = new Date(log[key]);
+      if (!isNaN(d.getTime())) return d;
+    }
+  }
+  return null;
+}
+
 // ─── 按 5 分钟时间段聚合总调用量 ─────────────────────
 const buckets = {};
 
 for (const log of allRecords) {
-  const time = new Date(log.startTime ?? log.createdAt ?? log.timestamp ?? Date.now());
-  // 向下取整到 5 分钟桶
+  const time = getLogTime(log);
+  if (!time) {
+    console.warn('无法解析时间字段:', JSON.stringify(log).slice(0, 200));
+    continue;
+  }
   const bucketTime = new Date(
     Math.floor(time.getTime() / (BUCKET_MINUTES * 60 * 1000)) * (BUCKET_MINUTES * 60 * 1000)
   );

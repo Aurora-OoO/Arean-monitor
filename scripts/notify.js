@@ -9,14 +9,14 @@ if (!WEBHOOK_URL) {
 
 const detailLine = ALERT_SUMMARY
   ? `近五分钟内\n\n${ALERT_SUMMARY.split('|').map(s => `- ${s}`).join('\n')}`
-  : '近五分钟内监控脚本执行失败（API 异常或请求超时）';
+  : '- 监控脚本执行失败告警：无法查询 Global Call 使用日志（API 异常或请求超时）';
 
 const payload = {
   msgtype: 'markdown',
   markdown: {
-    title: '模型异常告警',
+    title: 'Global Call 监控告警',
     text: [
-      '### ⚠️ 模型异常告警',
+      '### ⚠️ Global Call 监控告警',
       '',
       detailLine,
       '',

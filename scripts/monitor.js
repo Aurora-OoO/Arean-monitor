@@ -13,6 +13,7 @@ const LOOKBACK_MINUTES = 5;             // 回看最近 5 分钟的日志
 const PAGE_SIZE = 100;                  // API 最大支持 100 条/页
 const MAX_PAGES = 100;                  // 最多翻 100 页（10,000 条），防止异常时无限请求
 const MIN_CALLS_FOR_ALERT = 3;          // 单个模型 5 分钟内调用次数低于 3 次不报警
+const MIN_TOTAL_CALLS = 40;             // 5 分钟总调用量低于 40 报警
 const REQUEST_TIMEOUT_MS = 15_000;
 
 // 按调用量分档判定是否异常
@@ -21,6 +22,16 @@ function getAlertThreshold(total) {
   if (total >= 6 && total <= 8) return 0.6;   // 6-8 次：成功率低于 60% 报警
   if (total >= 9) return 0.8;                 // 9 次及以上：成功率低于 80% 报警
   return null;                                // 样本不足，不报警
+}
+
+// 将告警摘要写入 GitHub Actions output
+function writeAlertSummary(text) {
+  if (!process.env.GITHUB_OUTPUT) return;
+  const fs = require('node:fs');
+  fs.appendFileSync(
+    process.env.GITHUB_OUTPUT,
+    `alert_summary<<__ALERT_SUMMARY_EOF__\n${text}\n__ALERT_SUMMARY_EOF__\n`
+  );
 }
 
 // ─── 构造查询时间范围 ───────────────────────────────
@@ -76,16 +87,22 @@ let allRecords = [];
 let total = 0;
 let pageNo = 1;
 
-while (pageNo <= MAX_PAGES) {
-  const data = await fetchPage(pageNo);
-  total = data.total ?? 0;
-  const records = data.records ?? [];
-  allRecords = allRecords.concat(records);
+try {
+  while (pageNo <= MAX_PAGES) {
+    const data = await fetchPage(pageNo);
+    total = data.total ?? 0;
+    const records = data.records ?? [];
+    allRecords = allRecords.concat(records);
 
-  if (records.length < PAGE_SIZE || allRecords.length >= total) {
-    break;
+    if (records.length < PAGE_SIZE || allRecords.length >= total) {
+      break;
+    }
+    pageNo++;
   }
-  pageNo++;
+} catch (err) {
+  console.error(`[API ERROR] 查询失败: ${err.message}`);
+  writeAlertSummary(`监控接口异常告警：无法查询 Global Call 使用日志，${err.message}`);
+  process.exit(1);
 }
 
 if (allRecords.length === 0) {
@@ -95,6 +112,15 @@ if (allRecords.length === 0) {
 
 console.log(`获取 ${allRecords.length}/${total} 条调用记录（共 ${pageNo} 页）\n`);
 const records = allRecords;
+
+// ─── 总调用量告警 ───────────────────────────────────
+const volumeAlert = records.length < MIN_TOTAL_CALLS
+  ? `平台总调用量异常告警：近 ${LOOKBACK_MINUTES} 分钟仅 ${records.length} 次调用（阈值 ${MIN_TOTAL_CALLS} 次）`
+  : null;
+
+if (volumeAlert) {
+  console.error(`[VOLUME ALERT] ${volumeAlert}`);
+}
 
 // ─── 按模型统计 ─────────────────────────────────────
 const modelStats = {};
@@ -228,16 +254,25 @@ for (const [model, stats] of Object.entries(modelStats)) {
 }
 
 // ─── 判定结果 ───────────────────────────────────────
-if (downModels.length > 0) {
+const hasModelAlert = downModels.length > 0;
+const hasVolumeAlert = volumeAlert !== null;
+
+if (hasModelAlert) {
   console.error(`\n[ALERT] ${downModels.length} 个模型异常：`);
   for (const m of downModels) {
     console.error(`  - ${m.name}: ${m.errors}/${m.total} 失败, 成功率 ${(m.successRate * 100).toFixed(1)}% (阈值 ${(m.threshold * 100).toFixed(0)}%)${formatTraceInfo(m)}`);
   }
+}
 
-  // 将失败摘要写入 GitHub Actions output 供 notify.js 使用
-  if (process.env.GITHUB_OUTPUT) {
-    const fs = await import('node:fs');
-    const summary = downModels
+if (hasModelAlert || hasVolumeAlert) {
+  const parts = [];
+
+  if (hasVolumeAlert) {
+    parts.push(volumeAlert);
+  }
+
+  if (hasModelAlert) {
+    const modelSummary = downModels
       .map(m => {
         // 只取错误码部分，截断过长的描述
         let errorCode = m.details[0] ?? '未知';
@@ -245,17 +280,16 @@ if (downModels.length > 0) {
         if (colonIdx > 0) errorCode = errorCode.substring(0, colonIdx);
         if (errorCode.length > 50) errorCode = errorCode.substring(0, 50) + '...';
 
-        return `${m.name} 调用失败 ${m.errors} 次/总 ${m.total} 次，成功率 ${(m.successRate * 100).toFixed(1)}% (阈值 ${(m.threshold * 100).toFixed(0)}%)，错误码 ${errorCode}${formatTraceInfo(m)}`;
+        return `${m.name} 模型异常告警：调用失败 ${m.errors} 次/总 ${m.total} 次，成功率 ${(m.successRate * 100).toFixed(1)}% (阈值 ${(m.threshold * 100).toFixed(0)}%)，错误码 ${errorCode}${formatTraceInfo(m)}`;
       })
       .join('|');
-    // 使用 heredoc 语法写入多行 output，避免 traceId 换行导致 GitHub Actions 解析失败
-    fs.appendFileSync(
-      process.env.GITHUB_OUTPUT,
-      `alert_summary<<__ALERT_SUMMARY_EOF__\n${summary}\n__ALERT_SUMMARY_EOF__\n`
-    );
+    parts.push(modelSummary);
   }
+
+  const summary = parts.join('|');
+  writeAlertSummary(summary);
 
   process.exit(1);
 }
 
-console.log(`\n[PASS] 所有模型运行正常（共 ${Object.keys(modelStats).length} 个模型）。`);
+console.log(`\n[PASS] 所有模型运行正常（共 ${Object.keys(modelStats).length} 个模型），5 分钟总调用量 ${records.length} 次。`);
