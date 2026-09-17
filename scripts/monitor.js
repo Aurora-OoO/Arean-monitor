@@ -25,9 +25,9 @@ function getAlertThreshold(total) {
 }
 
 // 将告警摘要写入 GitHub Actions output
-function writeAlertSummary(text) {
+async function writeAlertSummary(text) {
   if (!process.env.GITHUB_OUTPUT) return;
-  const fs = require('node:fs');
+  const fs = await import('node:fs');
   fs.appendFileSync(
     process.env.GITHUB_OUTPUT,
     `alert_summary<<__ALERT_SUMMARY_EOF__\n${text}\n__ALERT_SUMMARY_EOF__\n`
@@ -101,7 +101,7 @@ try {
   }
 } catch (err) {
   console.error(`[API ERROR] 查询失败: ${err.message}`);
-  writeAlertSummary(`监控接口异常告警：无法查询 Global Call 使用日志，${err.message}`);
+  await writeAlertSummary(`监控接口异常告警：无法查询 Global Call 使用日志，${err.message}`);
   process.exit(1);
 }
 
@@ -287,7 +287,7 @@ if (hasModelAlert || hasVolumeAlert) {
   }
 
   const summary = parts.join('|');
-  writeAlertSummary(summary);
+  await writeAlertSummary(summary);
 
   process.exit(1);
 }
