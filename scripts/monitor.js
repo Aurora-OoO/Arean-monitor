@@ -11,7 +11,7 @@ const ROOT = BASE_URL.replace(/\/+$/, '');
 // ─── 配置 ───────────────────────────────────────────
 const LOOKBACK_MINUTES = 5;             // 回看最近 5 分钟的日志
 const PAGE_SIZE = 100;                  // API 最大支持 100 条/页
-const MAX_PAGES = 10;                   // 最多翻 10 页，防止异常时无限请求
+const MAX_PAGES = 100;                  // 最多翻 100 页（10,000 条），防止异常时无限请求
 const MIN_CALLS_FOR_ALERT = 3;          // 单个模型 5 分钟内调用次数低于 3 次不报警
 const REQUEST_TIMEOUT_MS = 15_000;
 
