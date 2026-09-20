@@ -164,7 +164,8 @@ for (const log of records) {
   const logType = log.logType || 'MODEL_CALL';
   const typeLabel = getLogTypeLabel(logType);
   const key = `${logType}::${model}`;
-  const isFailed = log.status !== 'SUCCESS' || log.rejected === true;
+  const isSuccess = log.status === 'SUCCESS' || log.status === 'SUCCEEDED';
+  const isFailed = !isSuccess || log.rejected === true;
 
   if (!modelStats[key]) {
     modelStats[key] = {
@@ -200,9 +201,15 @@ for (const log of records) {
     }
 
     if (modelStats[key].errorDetails.length < 3) {
-      const code = log.errorCode ?? log.errorCategory ?? 'UNKNOWN';
+      let code = log.errorCode ?? log.errorCategory ?? '';
       const msg = log.errorMessage ?? '';
-      modelStats[key].errorDetails.push(`${code}${msg ? ': ' + msg : ''}`);
+      if (!code && msg) {
+        code = msg;
+      }
+      if (!code) {
+        code = 'UNKNOWN';
+      }
+      modelStats[key].errorDetails.push(`${code}${msg && msg !== code ? ': ' + msg : ''}`);
     }
   }
 }
