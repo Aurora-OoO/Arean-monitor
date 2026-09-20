@@ -49,7 +49,6 @@ async function fetchPage(pageNo) {
   const params = new URLSearchParams({
     startTime: startTime.toISOString(),
     endTime: endTime.toISOString(),
-    logType: 'MODEL_CALL',
     pageNo: String(pageNo),
     pageSize: String(PAGE_SIZE),
   });
@@ -123,19 +122,36 @@ if (volumeAlert) {
   console.error(`[VOLUME ALERT] ${volumeAlert}`);
 }
 
-// ─── 按模型统计 ─────────────────────────────────────
+// ─── 按日志类型 + 模型统计 ───────────────────────────
+function getLogTypeLabel(logType) {
+  if (logType === 'TASK_SETTLEMENT') return '生图模型';
+  if (logType === 'MODEL_CALL') return '问答模型';
+  return '其他模型';
+}
+
 const modelStats = {};
 let sampleFailedLog = null;
 
 for (const log of records) {
   const model = log.modelName || 'unknown';
+  const logType = log.logType || 'MODEL_CALL';
+  const typeLabel = getLogTypeLabel(logType);
+  const key = `${logType}::${model}`;
   const isFailed = log.status !== 'SUCCESS' || log.rejected === true;
 
-  if (!modelStats[model]) {
-    modelStats[model] = { total: 0, errors: 0, errorDetails: [], tracePairs: [] };
+  if (!modelStats[key]) {
+    modelStats[key] = {
+      model,
+      logType,
+      typeLabel,
+      total: 0,
+      errors: 0,
+      errorDetails: [],
+      tracePairs: [],
+    };
   }
 
-  modelStats[model].total++;
+  modelStats[key].total++;
 
   if (isFailed) {
     // 跳过客户端错误（4xx 但 429 除外），只关注模型侧/服务端异常
@@ -143,23 +159,23 @@ for (const log of records) {
     const isClientError = upstream && upstream >= 400 && upstream < 500 && upstream !== 429;
     if (isClientError) continue;
 
-    modelStats[model].errors++;
+    modelStats[key].errors++;
     if (!sampleFailedLog) sampleFailedLog = log;
 
     // 按失败记录收集 traceId 和上游 request_id（同一行展示，最多保留 5 条）
     const traceId = findTraceId(log);
     const upstreamRequestId = findUpstreamRequestId(log);
-    if ((traceId || upstreamRequestId) && modelStats[model].tracePairs.length < 5) {
-      modelStats[model].tracePairs.push({
+    if ((traceId || upstreamRequestId) && modelStats[key].tracePairs.length < 5) {
+      modelStats[key].tracePairs.push({
         traceId: traceId || null,
         requestId: upstreamRequestId || null,
       });
     }
 
-    if (modelStats[model].errorDetails.length < 3) {
+    if (modelStats[key].errorDetails.length < 3) {
       const code = log.errorCode ?? log.errorCategory ?? 'UNKNOWN';
       const msg = log.errorMessage ?? '';
-      modelStats[model].errorDetails.push(`${code}${msg ? ': ' + msg : ''}`);
+      modelStats[key].errorDetails.push(`${code}${msg ? ': ' + msg : ''}`);
     }
   }
 }
@@ -228,14 +244,14 @@ function formatTraceInfo(m) {
 // ─── 逐模型判定 ─────────────────────────────────────
 const downModels = [];
 
-for (const [model, stats] of Object.entries(modelStats)) {
+for (const [key, stats] of Object.entries(modelStats)) {
   const errorRate = stats.errors / stats.total;
   const successRate = 1 - errorRate;
   const threshold = getAlertThreshold(stats.total);
   const isAbnormal = threshold !== null && successRate <= threshold;
   const icon = isAbnormal ? '✗' : '✓';
   const thresholdText = threshold !== null ? `阈值 ${(threshold * 100).toFixed(0)}%` : '样本不足';
-  console.log(`${icon} ${model}: ${stats.total} 次调用, ${stats.errors} 次失败, 成功率 ${(successRate * 100).toFixed(1)}% (${thresholdText})`);
+  console.log(`${icon} 【${stats.typeLabel}】${stats.model}: ${stats.total} 次调用, ${stats.errors} 次失败, 成功率 ${(successRate * 100).toFixed(1)}% (${thresholdText})`);
   for (const detail of stats.errorDetails) {
     console.log(`    → ${detail}`);
   }
@@ -243,7 +259,8 @@ for (const [model, stats] of Object.entries(modelStats)) {
   // 样本数足够且成功率低于对应档位阈值才判定为异常
   if (isAbnormal) {
     downModels.push({
-      name: model,
+      name: stats.model,
+      typeLabel: stats.typeLabel,
       errors: stats.errors,
       total: stats.total,
       successRate,
@@ -281,7 +298,7 @@ if (hasModelAlert || hasVolumeAlert) {
         if (colonIdx > 0) errorCode = errorCode.substring(0, colonIdx);
         if (errorCode.length > 50) errorCode = errorCode.substring(0, 50) + '...';
 
-        return `${m.name} 模型异常告警：调用失败 ${m.errors} 次/总 ${m.total} 次，成功率 ${(m.successRate * 100).toFixed(1)}% (阈值 ${(m.threshold * 100).toFixed(0)}%)，错误码 ${errorCode}${formatTraceInfo(m)}`;
+        return `【${m.typeLabel}】${m.name} 模型异常告警：调用失败 ${m.errors} 次/总 ${m.total} 次，成功率 ${(m.successRate * 100).toFixed(1)}% (阈值 ${(m.threshold * 100).toFixed(0)}%)，错误码 ${errorCode}${formatTraceInfo(m)}`;
       })
       .join('|');
     parts.push(modelSummary);
