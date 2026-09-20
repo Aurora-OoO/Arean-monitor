@@ -45,10 +45,11 @@ console.log(`Querying usage logs: ${startTime.toISOString()} ~ ${endTime.toISOSt
 // ELB 证书域名与地址不匹配，需要跳过 TLS 校验
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
-async function fetchPage(pageNo) {
+async function fetchPage(logType, pageNo) {
   const params = new URLSearchParams({
     startTime: startTime.toISOString(),
     endTime: endTime.toISOString(),
+    logType,
     pageNo: String(pageNo),
     pageSize: String(PAGE_SIZE),
   });
@@ -83,22 +84,46 @@ async function fetchPage(pageNo) {
   }
 }
 
-let allRecords = [];
-let total = 0;
-let pageNo = 1;
+async function fetchAllRecords(logType) {
+  const records = [];
+  let total = 0;
+  let pageNo = 1;
 
-try {
   while (pageNo <= MAX_PAGES) {
-    const data = await fetchPage(pageNo);
+    const data = await fetchPage(logType, pageNo);
     total = data.total ?? 0;
-    const records = data.records ?? [];
-    allRecords = allRecords.concat(records);
+    const pageRecords = data.records ?? [];
 
-    if (records.length < PAGE_SIZE || allRecords.length >= total) {
+    // 把 logType 补到每条记录上（兼容 API 未返回该字段的情况）
+    for (const log of pageRecords) {
+      if (!log.logType) log.logType = logType;
+    }
+    records.push(...pageRecords);
+
+    if (pageRecords.length < PAGE_SIZE || records.length >= total) {
       break;
     }
     pageNo++;
   }
+
+  return { records, total, pages: pageNo };
+}
+
+let allRecords = [];
+let totalModelCall = 0;
+let totalTaskSettlement = 0;
+let pagesModelCall = 0;
+let pagesTaskSettlement = 0;
+
+try {
+  const modelCallResult = await fetchAllRecords('MODEL_CALL');
+  const taskSettlementResult = await fetchAllRecords('TASK_SETTLEMENT');
+
+  allRecords = modelCallResult.records.concat(taskSettlementResult.records);
+  totalModelCall = modelCallResult.total;
+  totalTaskSettlement = taskSettlementResult.total;
+  pagesModelCall = modelCallResult.pages;
+  pagesTaskSettlement = taskSettlementResult.pages;
 } catch (err) {
   console.error(`[API ERROR] 查询失败: ${err.message}`);
   await writeAlertSummary(`监控接口异常告警：无法查询 Global Call 使用日志，${err.message}`);
@@ -106,11 +131,13 @@ try {
 }
 
 if (allRecords.length === 0) {
-  console.log(`最近 ${LOOKBACK_MINUTES} 分钟内无调用记录（total=${total}），视为正常。`);
+  console.log(`最近 ${LOOKBACK_MINUTES} 分钟内无调用记录，视为正常。`);
   process.exit(0);
 }
 
-console.log(`获取 ${allRecords.length}/${total} 条调用记录（共 ${pageNo} 页）\n`);
+console.log(`获取 ${allRecords.length} 条调用记录`);
+console.log(`  - MODEL_CALL: ${totalModelCall} 条（${pagesModelCall} 页）`);
+console.log(`  - TASK_SETTLEMENT: ${totalTaskSettlement} 条（${pagesTaskSettlement} 页）\n`);
 const records = allRecords;
 
 // ─── 总调用量告警 ───────────────────────────────────
