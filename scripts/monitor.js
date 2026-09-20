@@ -35,8 +35,9 @@ async function writeAlertSummary(text) {
 }
 
 // ─── 构造查询时间范围 ───────────────────────────────
-const endTime = new Date();
-const startTime = new Date(endTime.getTime() - LOOKBACK_MINUTES * 60 * 1000);
+// 支持通过环境变量指定固定时间范围（调试用途）
+const endTime = process.env.MONITOR_END_TIME ? new Date(process.env.MONITOR_END_TIME) : new Date();
+const startTime = process.env.MONITOR_START_TIME ? new Date(process.env.MONITOR_START_TIME) : new Date(endTime.getTime() - LOOKBACK_MINUTES * 60 * 1000);
 
 console.log(`Querying usage logs: ${startTime.toISOString()} ~ ${endTime.toISOString()}`);
 
