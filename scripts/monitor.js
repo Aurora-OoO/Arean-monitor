@@ -20,7 +20,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 function getAlertThreshold(total) {
   if (total >= 4 && total <= 5) return 0.4;   // 4-5 次：成功率低于 40% 报警
   if (total >= 6 && total <= 8) return 0.6;   // 6-8 次：成功率低于 60% 报警
-  if (total >= 9) return 0.8;                 // 9 次及以上：成功率低于 80% 报警
+  if (total >= 9) return 0.7;                 // 9 次及以上：成功率低于 70% 报警
   return null;                                // 样本不足，不报警
 }
 
@@ -264,20 +264,20 @@ function findUpstreamRequestId(log) {
   return null;
 }
 
-// 拼接排查 ID：同一失败记录的 request_id 和 traceId 在同一行，超过 5 行则提示信息过长
+// 拼接排查 ID：只保留首次出现的字段标签，后续仅显示值
 function formatTraceInfo(m) {
   const pairs = m.tracePairs;
   if (pairs.length === 0) return '';
 
-  let lines = pairs.map(pair => {
-    const parts = [];
-    if (pair.requestId) parts.push(`request_id: ${pair.requestId}`);
-    if (pair.traceId) parts.push(`traceId: ${pair.traceId}`);
-    return parts.join(', ');
-  });
+  const requestIds = pairs.map(pair => pair.requestId).filter(Boolean);
+  const traceIds = pairs.map(pair => pair.traceId).filter(Boolean);
+
+  const lines = [];
+  requestIds.forEach((id, idx) => lines.push(idx === 0 ? `request_id: ${id}` : id));
+  traceIds.forEach((id, idx) => lines.push(idx === 0 ? `traceId: ${id}` : id));
 
   if (lines.length > 5) {
-    lines = [...lines.slice(0, 5), '信息过长'];
+    lines.splice(5, lines.length - 5, '信息过长');
   }
   return '\n' + lines.map(line => `  - ${line}`).join('\n');
 }
