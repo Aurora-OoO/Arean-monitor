@@ -12,13 +12,13 @@ const ROOT = BASE_URL.replace(/\/+$/, '');
 const LOOKBACK_MINUTES = 5;             // 回看最近 5 分钟的日志
 const PAGE_SIZE = 100;                  // API 最大支持 100 条/页
 const MAX_PAGES = 100;                  // 最多翻 100 页（10,000 条），防止异常时无限请求
-const MIN_CALLS_FOR_ALERT = 3;          // 单个模型 5 分钟内调用次数低于 3 次不报警
+const MIN_CALLS_FOR_ALERT = 4;          // 单个模型 5 分钟内调用次数低于 4 次不报警
 const MIN_TOTAL_CALLS = 20;             // 5 分钟总调用量低于 40 报警
 const REQUEST_TIMEOUT_MS = 15_000;
 
 // 按调用量分档判定是否异常
 function getAlertThreshold(total) {
-  if (total >= 3 && total <= 5) return 0.4;   // 3-5 次：成功率低于 40% 报警
+  if (total >= 4 && total <= 5) return 0.4;   // 4-5 次：成功率低于 40% 报警
   if (total >= 6 && total <= 8) return 0.6;   // 6-8 次：成功率低于 60% 报警
   if (total >= 9) return 0.8;                 // 9 次及以上：成功率低于 80% 报警
   return null;                                // 样本不足，不报警
