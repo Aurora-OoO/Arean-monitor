@@ -20,7 +20,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 function getAlertThreshold(total) {
   if (total >= 4 && total <= 5) return 0.4;   // 4-5 次：成功率低于 40% 报警
   if (total >= 6 && total <= 8) return 0.6;   // 6-8 次：成功率低于 60% 报警
-  if (total >= 9) return 0.7;                 // 9 次及以上：成功率低于 70% 报警
+  if (total >= 9) return 0.6;                 // 9 次及以上：成功率低于 60% 报警
   return null;                                // 样本不足，不报警
 }
 
