@@ -24,57 +24,55 @@ function parseSummary(raw) {
 
 // 单个错误最多展示 5 条 ID：优先 traceId，无 traceId 才回退 request_id；标签独占一行
 const MAX_IDS_PER_ERROR = 5;
+const LINE_BREAK = '  \n';   // 钉钉 markdown 里单 \n 是软换行（会并成一行），行尾两个空格才是硬换行
 
-function renderTraceBlock(pairs = []) {
+function renderTraceLines(pairs = []) {
   const traceIds = pairs.map(pair => pair.traceId).filter(Boolean).slice(0, MAX_IDS_PER_ERROR);
-  if (traceIds.length > 0) return ['traceId:', ...traceIds].join('\n');
+  if (traceIds.length > 0) return ['traceId:', ...traceIds];
 
   const requestIds = pairs.map(pair => pair.requestId).filter(Boolean).slice(0, MAX_IDS_PER_ERROR);
-  if (requestIds.length > 0) return ['request_id:', ...requestIds].join('\n');
+  if (requestIds.length > 0) return ['request_id:', ...requestIds];
 
-  return '';
+  return [];
 }
 
-// 逐行纯文本排版，不用列表项符号
-function renderModel(m) {
-  const metrics = [
-    `失败 ${m.errors} / 总 ${m.total} 次`,
-    `成功率 ${m.successRate}%（阈值 ${m.threshold}%）`,
+// 每个模型三行：模型名 / 指标 / 错误码，下面再跟一组排查 ID
+function renderModelLines(m) {
+  const lines = [
+    `**【${m.typeLabel}】${m.name}**`,
+    `失败 ${m.errors} / 总 ${m.total} 次 · 成功率 ${m.successRate}%（阈值 ${m.threshold}%）`,
   ];
-  if (m.errorCode) metrics.push(`错误码 ${m.errorCode}`);
-
-  const lines = [`**【${m.typeLabel}】${m.name}**`, metrics.join(' · ')];
-  const traceBlock = renderTraceBlock(m.tracePairs);
-  if (traceBlock) lines.push(traceBlock);
-  return lines.join('\n');
+  if (m.errorCode) lines.push(`错误码 ${m.errorCode}`);
+  lines.push(...renderTraceLines(m.tracePairs));
+  return lines;
 }
 
 function renderMessage() {
-  const blocks = ['### ⚠️ Global Call 监控告警'];
+  const blocks = [['### ⚠️ Global Call 监控告警']];
   const payload = parseSummary(ALERT_SUMMARY);
 
   if (payload) {
     const subtitle = [`近 ${payload.lookbackMinutes} 分钟`];
     if (payload.volume) subtitle.push('总调用量偏低');
     if (payload.models?.length > 0) subtitle.push(`${payload.models.length} 个模型异常`);
-    blocks.push(`> ${subtitle.join(' · ')}`);
+    blocks.push([`> ${subtitle.join(' · ')}`]);
 
     if (payload.volume) {
-      blocks.push(`**平台总调用量异常**\n近 ${payload.lookbackMinutes} 分钟仅 ${payload.volume.calls} 次调用（阈值 ${payload.volume.threshold} 次）`);
+      blocks.push(['**平台总调用量异常**', `近 ${payload.lookbackMinutes} 分钟仅 ${payload.volume.calls} 次调用（阈值 ${payload.volume.threshold} 次）`]);
     }
 
     for (const m of payload.models ?? []) {
-      blocks.push(renderModel(m));
+      blocks.push(renderModelLines(m));
     }
   } else {
     const fallback = ALERT_SUMMARY || `监控脚本执行失败告警：无法查询 Global Call 使用日志（API 异常或请求超时）`;
-    blocks.push(fallback.split('|').map(s => s.trim()).join('\n'));
+    blocks.push(fallback.split('|').map(s => s.trim()));
   }
 
   if (ADMIN_URL) {
-    blocks.push(`[查看日志](${ADMIN_URL})`);
+    blocks.push([`[查看日志](${ADMIN_URL})`]);
   }
-  return blocks.join('\n\n');
+  return blocks.map(lines => lines.join(LINE_BREAK)).join('\n\n');
 }
 
 const text = renderMessage();
