@@ -2,7 +2,6 @@ const WEBHOOK_URL = process.env.DINGTALK_WEBHOOK_URL;
 const ADMIN_URL = process.env.GLOBALCALL_BASE_URL || '';
 const ALERT_SUMMARY = process.env.ALERT_SUMMARY || '';
 
-const MAX_TRACE_PAIRS = 3;              // 每个模型最多展示几对排查 ID，避免消息过长
 const DRY_RUN = process.env.DINGTALK_DRY_RUN === '1';
 
 if (!WEBHOOK_URL && !DRY_RUN) {
@@ -23,27 +22,30 @@ function parseSummary(raw) {
   return null;
 }
 
-function renderTracePairs(pairs = []) {
-  return pairs
-    .slice(0, MAX_TRACE_PAIRS)
-    .map(pair => {
-      const ids = [];
-      if (pair.requestId) ids.push(`request_id ${pair.requestId}`);
-      if (pair.traceId) ids.push(`traceId ${pair.traceId}`);
-      return ids.length > 0 ? `- ${ids.join(' · ')}` : null;
-    })
-    .filter(Boolean);
+// 单个错误最多展示 5 条 ID：优先 traceId，无 traceId 才回退 request_id；标签独占一行
+const MAX_IDS_PER_ERROR = 5;
+
+function renderTraceBlock(pairs = []) {
+  const traceIds = pairs.map(pair => pair.traceId).filter(Boolean).slice(0, MAX_IDS_PER_ERROR);
+  if (traceIds.length > 0) return ['traceId:', ...traceIds].join('\n');
+
+  const requestIds = pairs.map(pair => pair.requestId).filter(Boolean).slice(0, MAX_IDS_PER_ERROR);
+  if (requestIds.length > 0) return ['request_id:', ...requestIds].join('\n');
+
+  return '';
 }
 
+// 逐行纯文本排版，不用列表项符号
 function renderModel(m) {
-  const lines = [
-    `**【${m.typeLabel}】${m.name}**`,
-    `- 失败 **${m.errors}** / 总 ${m.total} 次 · 成功率 **${m.successRate}%**（阈值 ${m.threshold}%）`,
+  const metrics = [
+    `失败 ${m.errors} / 总 ${m.total} 次`,
+    `成功率 ${m.successRate}%（阈值 ${m.threshold}%）`,
   ];
-  if (m.errorCode) {
-    lines.push(`- 错误码 ${m.errorCode}`);
-  }
-  lines.push(...renderTracePairs(m.tracePairs));
+  if (m.errorCode) metrics.push(`错误码 ${m.errorCode}`);
+
+  const lines = [`**【${m.typeLabel}】${m.name}**`, metrics.join(' · ')];
+  const traceBlock = renderTraceBlock(m.tracePairs);
+  if (traceBlock) lines.push(traceBlock);
   return lines.join('\n');
 }
 
@@ -58,7 +60,7 @@ function renderMessage() {
     blocks.push(`> ${subtitle.join(' · ')}`);
 
     if (payload.volume) {
-      blocks.push(`**平台总调用量异常**\n- 近 ${payload.lookbackMinutes} 分钟仅 ${payload.volume.calls} 次调用（阈值 ${payload.volume.threshold} 次）`);
+      blocks.push(`**平台总调用量异常**\n近 ${payload.lookbackMinutes} 分钟仅 ${payload.volume.calls} 次调用（阈值 ${payload.volume.threshold} 次）`);
     }
 
     for (const m of payload.models ?? []) {
@@ -66,7 +68,7 @@ function renderMessage() {
     }
   } else {
     const fallback = ALERT_SUMMARY || `监控脚本执行失败告警：无法查询 Global Call 使用日志（API 异常或请求超时）`;
-    blocks.push(fallback.split('|').map(s => `- ${s.trim()}`).join('\n'));
+    blocks.push(fallback.split('|').map(s => s.trim()).join('\n'));
   }
 
   if (ADMIN_URL) {
