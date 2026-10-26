@@ -264,22 +264,23 @@ function findUpstreamRequestId(log) {
   return null;
 }
 
-// 拼接排查 ID：只保留首次出现的字段标签，后续仅显示值
+// 拼接排查 ID（仅用于 Actions 日志输出，钉钉消息由 notify.js 排版）
+const MAX_LOG_TRACE_PAIRS = 3;
+
 function formatTraceInfo(m) {
-  const pairs = m.tracePairs;
-  if (pairs.length === 0) return '';
+  const shown = m.tracePairs.slice(0, MAX_LOG_TRACE_PAIRS);
+  if (shown.length === 0) return '';
 
-  const requestIds = pairs.map(pair => pair.requestId).filter(Boolean);
-  const traceIds = pairs.map(pair => pair.traceId).filter(Boolean);
+  const lines = shown.map(pair => {
+    const ids = [];
+    if (pair.requestId) ids.push(`request_id=${pair.requestId}`);
+    if (pair.traceId) ids.push(`traceId=${pair.traceId}`);
+    return ids.join(' ');
+  });
 
-  const lines = [];
-  requestIds.forEach((id, idx) => lines.push(idx === 0 ? `request_id: ${id}` : id));
-  traceIds.forEach((id, idx) => lines.push(idx === 0 ? `traceId: ${id}` : id));
-
-  if (lines.length > 5) {
-    lines.splice(5, lines.length - 5, '信息过长');
-  }
-  return '\n' + lines.map(line => `  - ${line}`).join('\n');
+  const rest = m.tracePairs.length - shown.length;
+  if (rest > 0) lines.push(`其余 ${rest} 条略`);
+  return '\n' + lines.map(line => `      - ${line}`).join('\n');
 }
 
 // ─── 逐模型判定 ─────────────────────────────────────
@@ -324,28 +325,33 @@ if (hasModelAlert) {
 }
 
 if (hasModelAlert || hasVolumeAlert) {
-  const parts = [];
+  // 交给 notify.js 排版的结构化摘要（JSON 单行，避免分隔符与内容冲突）
+  const payload = {
+    lookbackMinutes: LOOKBACK_MINUTES,
+    volume: hasVolumeAlert ? { calls: records.length, threshold: MIN_TOTAL_CALLS } : null,
+    models: hasModelAlert
+      ? downModels.map(m => {
+          // 只取错误码部分，截断过长的描述
+          let errorCode = m.details[0] ?? '未知';
+          const colonIdx = errorCode.indexOf(': ');
+          if (colonIdx > 0) errorCode = errorCode.substring(0, colonIdx);
+          if (errorCode.length > 50) errorCode = errorCode.substring(0, 50) + '...';
 
-  if (hasVolumeAlert) {
-    parts.push(volumeAlert);
-  }
+          return {
+            typeLabel: m.typeLabel,
+            name: m.name,
+            errors: m.errors,
+            total: m.total,
+            successRate: Number((m.successRate * 100).toFixed(1)),
+            threshold: Math.round(m.threshold * 100),
+            errorCode,
+            tracePairs: m.tracePairs,
+          };
+        })
+      : [],
+  };
 
-  if (hasModelAlert) {
-    const modelSummary = downModels
-      .map(m => {
-        // 只取错误码部分，截断过长的描述
-        let errorCode = m.details[0] ?? '未知';
-        const colonIdx = errorCode.indexOf(': ');
-        if (colonIdx > 0) errorCode = errorCode.substring(0, colonIdx);
-        if (errorCode.length > 50) errorCode = errorCode.substring(0, 50) + '...';
-
-        return `【${m.typeLabel}】${m.name} 模型异常告警：调用失败 ${m.errors} 次/总 ${m.total} 次，成功率 ${(m.successRate * 100).toFixed(1)}% (阈值 ${(m.threshold * 100).toFixed(0)}%)，错误码 ${errorCode}${formatTraceInfo(m)}`;
-      })
-      .join('|');
-    parts.push(modelSummary);
-  }
-
-  const summary = parts.join('|');
+  const summary = JSON.stringify(payload);
   await writeAlertSummary(summary);
 
   process.exit(1);
