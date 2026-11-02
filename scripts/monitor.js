@@ -131,8 +131,14 @@ try {
 }
 
 if (allRecords.length === 0) {
-  console.log(`最近 ${LOOKBACK_MINUTES} 分钟内无调用记录，视为正常。`);
-  process.exit(0);
+  const summary = JSON.stringify({
+    lookbackMinutes: LOOKBACK_MINUTES,
+    volume: { calls: 0, threshold: MIN_TOTAL_CALLS },
+    models: [],
+  });
+  await writeAlertSummary(summary);
+  console.error(`[VOLUME ALERT] 近 ${LOOKBACK_MINUTES} 分钟无任何调用记录（0 次，阈值 ${MIN_TOTAL_CALLS} 次）`);
+  process.exit(1);
 }
 
 console.log(`获取 ${allRecords.length} 条调用记录`);
