@@ -64,6 +64,11 @@ function renderMessage() {
     for (const m of payload.models ?? []) {
       blocks.push(renderModelLines(m));
     }
+
+    // 任一模型成功率为 0 时，追加加粗提示并 @所有人
+    if (payload.models?.some(m => m.successRate === 0)) {
+      blocks.push(['**模型成功率为0**', '<at id=all></at>']);
+    }
   } else {
     const fallback = ALERT_SUMMARY || `监控脚本执行失败告警：无法查询 Global Call 使用日志（API 异常或请求超时）`;
     blocks.push(fallback.split('|').map(s => s.trim()));
