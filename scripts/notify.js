@@ -50,6 +50,7 @@ function renderModelLines(m) {
 function renderMessage() {
   const blocks = [['### ⚠️ Global Call 监控告警']];
   const payload = parseSummary(ALERT_SUMMARY);
+  let atAll = false;
 
   if (payload) {
     const subtitle = [`近 ${payload.lookbackMinutes} 分钟`];
@@ -65,9 +66,10 @@ function renderMessage() {
       blocks.push(renderModelLines(m));
     }
 
-    // 任一模型成功率为 0 时，追加加粗提示并 @所有人
+    // 任一模型成功率为 0 时，追加加粗提示并 @所有人（markdown 内嵌 <at> 不生效，靠消息体 at 字段触发）
     if (payload.models?.some(m => m.successRate === 0)) {
-      blocks.push(['**模型成功率为0**', '<at id=all></at>']);
+      atAll = true;
+      blocks.push(['**模型成功率为0**', '@所有人']);
     }
   } else {
     const fallback = ALERT_SUMMARY || `监控脚本执行失败告警：无法查询 Global Call 使用日志（API 异常或请求超时）`;
@@ -77,10 +79,10 @@ function renderMessage() {
   if (ADMIN_URL) {
     blocks.push([`[查看日志](${ADMIN_URL})`]);
   }
-  return blocks.map(lines => lines.join(LINE_BREAK)).join('\n\n');
+  return { text: blocks.map(lines => lines.join(LINE_BREAK)).join('\n\n'), atAll };
 }
 
-const text = renderMessage();
+const { text, atAll } = renderMessage();
 
 if (DRY_RUN) {
   console.log('--- DingTalk markdown (dry run) ---');
@@ -94,6 +96,8 @@ const payload = {
     title: 'Global Call 监控告警',
     text,
   },
+  // @所有人 必须走 at 字段（isAtAll: true），markdown 文本里的 <at> 标签钉钉不渲染
+  ...(atAll ? { at: { isAtAll: true } } : {}),
 };
 
 console.log('Sending DingTalk alert ...');
